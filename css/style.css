@@ -1,0 +1,112 @@
+/* Tahta Connect - Mobile Frontend Styles */
+
+/* Base styles */
+* {
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    overscroll-behavior: none;
+}
+
+/* Status indicator animation */
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.5;
+    }
+}
+
+.animate-pulse {
+    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Button hover states for mobile */
+button:active {
+    transform: scale(0.95);
+}
+
+button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Camera preview */
+#camera-preview {
+    aspect-ratio: 4/3;
+    object-fit: cover;
+}
+
+#photo-preview {
+    aspect-ratio: 4/3;
+    object-fit: contain;
+}
+
+/* Audio waveform bars */
+.waveform-bar {
+    width: 4px;
+    background: linear-gradient(to top, #22c55e, #4ade80);
+    border-radius: 2px;
+    transition: height 0.1s ease-out;
+    min-height: 4px;
+}
+
+/* Progress bar animation */
+#progress-bar {
+    transition: width 0.3s ease-out;
+}
+
+/* Status colors */
+.status-connecting #status-dot {
+    background-color: #eab308;
+    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.status-connected #status-dot {
+    background-color: #22c55e;
+    animation: none;
+}
+
+.status-disconnected #status-dot {
+    background-color: #ef4444;
+    animation: none;
+}
+
+.status-error #status-dot {
+    background-color: #ef4444;
+    animation: pulse 1s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Safe area padding for notched phones */
+@supports (padding: max(0px)) {
+    #app {
+        padding-left: max(1rem, env(safe-area-inset-left));
+        padding-right: max(1rem, env(safe-area-inset-right));
+        padding-bottom: max(1.5rem, env(safe-area-inset-bottom));
+    }
+}
+
+/* Smooth transitions */
+#actions, #camera-view, #audio-view, #photo-preview-view, #progress, #error-message {
+    transition: opacity 0.2s ease-out;
+}
+
+/* Loading spinner (optional) */
+.spinner {
+    border: 2px solid rgba(255, 255, 255, 0.1);
+    border-left-color: #fff;
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
