@@ -1,6 +1,5 @@
 /**
- * Tahta Connect - Main UI Logic
- * Handles camera, gallery, audio recording, and sending to Tahta
+ * Tahta Connect - Main Application
  */
 
 import { FirebaseSignaling } from './firebase.js';
@@ -14,459 +13,285 @@ let mediaRecorder = null;
 let audioChunks = [];
 let audioTimer = null;
 let audioSeconds = 0;
-let currentFacingMode = 'environment'; // Back camera by default
-let capturedPhotoBlob = null;
+let facingMode = 'environment';
+let capturedBlob = null;
 
-// DOM elements (cached after load)
-let elements = {};
+// Views
+const views = {
+    error: null,
+    main: null,
+    camera: null,
+    photo: null,
+    audio: null,
+    progress: null,
+    success: null
+};
 
-/**
- * Initialize on page load
- */
-$(document).ready(function() {
-    // Cache DOM elements
-    elements = {
-        statusBar: $('#status-bar'),
-        statusDot: $('#status-dot'),
-        statusText: $('#status-text'),
-        errorMessage: $('#error-message'),
-        errorText: $('#error-text'),
-        actions: $('#actions'),
-        cameraView: $('#camera-view'),
-        cameraPreview: $('#camera-preview'),
-        photoPreviewView: $('#photo-preview-view'),
-        photoPreview: $('#photo-preview'),
-        audioView: $('#audio-view'),
-        audioTimer: $('#audio-timer'),
-        waveformBars: $('#waveform-bars'),
-        progress: $('#progress'),
-        progressBar: $('#progress-bar'),
-        progressText: $('#progress-text'),
-        fileInput: $('#file-input')
-    };
+// Initialize
+$(document).ready(() => {
+    // Cache views
+    views.error = $('#error-view');
+    views.main = $('#main-view');
+    views.camera = $('#camera-view');
+    views.photo = $('#photo-view');
+    views.audio = $('#audio-view');
+    views.progress = $('#progress-view');
+    views.success = $('#success-view');
 
-    // Get room ID from URL
+    // Get room from URL
     const params = new URLSearchParams(window.location.search);
     const roomId = params.get('room');
 
     if (!roomId) {
-        showError('Gecersiz baglanti linki. QR kodu tekrar okutun.');
+        showError('Gecersiz baglanti. QR kodu tekrar okutun.');
         return;
     }
 
-    // Initialize connection
-    initConnection(roomId);
+    // Connect
+    connect(roomId);
 
-    // Button event handlers
+    // Event handlers
     $('#btn-camera').click(openCamera);
-    $('#btn-gallery').click(() => elements.fileInput.click());
-    $('#btn-audio').click(startAudioRecording);
-    $('#btn-capture').click(capturePhoto);
+    $('#btn-gallery').click(() => $('#file-input').click());
+    $('#btn-audio').click(startRecording);
+    $('#btn-capture').click(capture);
     $('#btn-cancel-camera').click(closeCamera);
     $('#btn-switch-camera').click(switchCamera);
-    $('#btn-send-photo').click(sendCapturedPhoto);
-    $('#btn-retake-photo').click(retakePhoto);
-    $('#btn-stop-audio').click(stopAudioRecording);
-    $('#btn-cancel-audio').click(cancelAudioRecording);
-    elements.fileInput.change(handleFileSelect);
+    $('#btn-send-photo').click(sendPhoto);
+    $('#btn-retake').click(retake);
+    $('#btn-stop-audio').click(stopRecording);
+    $('#btn-cancel-audio').click(cancelRecording);
+    $('#btn-retry').click(() => location.reload());
+    $('#file-input').change(handleFile);
 });
 
-/**
- * Initialize WebRTC connection
- */
-async function initConnection(roomId) {
-    try {
-        updateStatus('connecting', 'Baglaniyor...');
+// Show a view
+function showView(name) {
+    Object.values(views).forEach(v => v.addClass('hidden'));
+    if (views[name]) views[name].removeClass('hidden');
+}
 
-        // Initialize Firebase signaling
+// Update status
+function setStatus(state, text) {
+    $('#status-dot').removeClass('connecting connected error').addClass(state);
+    $('#status-text').text(text);
+}
+
+// Show error
+function showError(message) {
+    $('#error-text').text(message);
+    setStatus('error', 'Hata');
+    showView('error');
+}
+
+// Connect to Tahta
+async function connect(roomId) {
+    setStatus('connecting', 'Baglaniyor');
+
+    try {
         signaling = new FirebaseSignaling(roomId);
 
-        // Check if room exists
-        const roomExists = await signaling.checkRoom();
-        if (!roomExists) {
-            showError('Tahta baglantisi bulunamadi. QR kodu tekrar okutun.');
+        const exists = await signaling.checkRoom();
+        if (!exists) {
+            showError('Tahta bulunamadi. QR kodu tekrar okutun.');
             return;
         }
 
-        // Initialize WebRTC
         rtc = new WebRTCClient(signaling);
 
         rtc.onConnected = () => {
-            updateStatus('connected', 'Baglandi');
-            elements.actions.removeClass('hidden');
-            elements.errorMessage.addClass('hidden');
+            setStatus('connected', 'Bagli');
+            showView('main');
         };
 
         rtc.onDisconnected = () => {
-            updateStatus('disconnected', 'Baglanti kesildi');
-            elements.actions.addClass('hidden');
+            setStatus('error', 'Baglanti kesildi');
         };
 
-        rtc.onProgress = (progress) => {
-            elements.progressBar.css('width', (progress * 100) + '%');
+        rtc.onProgress = (p) => {
+            $('#progress-fill').css('width', (p * 100) + '%');
         };
 
-        rtc.onError = (error) => {
-            console.error('WebRTC error:', error);
-            showError('Baglanti hatasi olustu.');
+        rtc.onError = () => {
+            showError('Baglanti hatasi.');
         };
 
-        // Connect
         await rtc.connect();
 
-    } catch (error) {
-        console.error('Connection error:', error);
-        showError('Baglanti kurulamadi. Sayfayi yenileyin.');
+    } catch (e) {
+        console.error(e);
+        showError('Baglanti kurulamadi.');
     }
 }
 
-/**
- * Update status indicator
- */
-function updateStatus(status, text) {
-    elements.statusText.text(text);
-
-    // Remove all status classes
-    elements.statusBar.removeClass('status-connecting status-connected status-disconnected status-error');
-
-    // Add current status class
-    elements.statusBar.addClass('status-' + status);
-
-    // Update dot color
-    elements.statusDot.removeClass('bg-yellow-500 bg-green-500 bg-red-500 animate-pulse');
-
-    switch (status) {
-        case 'connecting':
-            elements.statusDot.addClass('bg-yellow-500 animate-pulse');
-            break;
-        case 'connected':
-            elements.statusDot.addClass('bg-green-500');
-            break;
-        case 'disconnected':
-        case 'error':
-            elements.statusDot.addClass('bg-red-500');
-            break;
-    }
-}
-
-/**
- * Show error message
- */
-function showError(message) {
-    elements.errorText.text(message);
-    elements.errorMessage.removeClass('hidden');
-    updateStatus('error', 'Hata');
-}
-
-// ==================== Camera Functions ====================
-
-/**
- * Open camera
- */
+// Camera
 async function openCamera() {
     try {
-        const constraints = {
-            video: {
-                facingMode: currentFacingMode,
-                width: { ideal: 1280 },
-                height: { ideal: 960 }
-            },
+        videoStream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode, width: { ideal: 1280 }, height: { ideal: 960 } },
             audio: false
-        };
-
-        videoStream = await navigator.mediaDevices.getUserMedia(constraints);
-
-        const video = document.getElementById('camera-preview');
-        video.srcObject = videoStream;
-
-        elements.actions.addClass('hidden');
-        elements.cameraView.removeClass('hidden');
-
-    } catch (error) {
-        console.error('Camera error:', error);
-        alert('Kamera erisimi reddedildi veya kamera bulunamadi.');
+        });
+        document.getElementById('camera-preview').srcObject = videoStream;
+        showView('camera');
+    } catch (e) {
+        alert('Kamera erisimi reddedildi.');
     }
 }
 
-/**
- * Switch between front and back camera
- */
-async function switchCamera() {
-    currentFacingMode = currentFacingMode === 'environment' ? 'user' : 'environment';
+function closeCamera() {
+    stopCamera();
+    showView('main');
+}
 
-    // Stop current stream
+function stopCamera() {
     if (videoStream) {
-        videoStream.getTracks().forEach(track => track.stop());
+        videoStream.getTracks().forEach(t => t.stop());
+        videoStream = null;
     }
+}
 
-    // Reopen with new facing mode
+async function switchCamera() {
+    facingMode = facingMode === 'environment' ? 'user' : 'environment';
+    stopCamera();
     await openCamera();
 }
 
-/**
- * Capture photo from video
- */
-function capturePhoto() {
+function capture() {
     const video = document.getElementById('camera-preview');
     const canvas = document.createElement('canvas');
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
 
     const ctx = canvas.getContext('2d');
-
-    // Flip horizontally if using front camera
-    if (currentFacingMode === 'user') {
+    if (facingMode === 'user') {
         ctx.translate(canvas.width, 0);
         ctx.scale(-1, 1);
     }
-
     ctx.drawImage(video, 0, 0);
 
-    // Stop camera
-    if (videoStream) {
-        videoStream.getTracks().forEach(track => track.stop());
-        videoStream = null;
-    }
+    stopCamera();
 
-    // Convert to blob and show preview
-    canvas.toBlob((blob) => {
-        capturedPhotoBlob = blob;
-
-        // Show preview
-        const url = URL.createObjectURL(blob);
-        elements.photoPreview.attr('src', url);
-
-        elements.cameraView.addClass('hidden');
-        elements.photoPreviewView.removeClass('hidden');
-
+    canvas.toBlob(blob => {
+        capturedBlob = blob;
+        $('#photo-preview').attr('src', URL.createObjectURL(blob));
+        showView('photo');
     }, 'image/jpeg', 0.9);
 }
 
-/**
- * Send captured photo
- */
-async function sendCapturedPhoto() {
-    if (!capturedPhotoBlob) return;
-
-    elements.photoPreviewView.addClass('hidden');
-    await sendMedia('image', 'photo.jpg', capturedPhotoBlob);
-    capturedPhotoBlob = null;
-    elements.actions.removeClass('hidden');
-}
-
-/**
- * Retake photo
- */
-function retakePhoto() {
-    capturedPhotoBlob = null;
-    elements.photoPreviewView.addClass('hidden');
+function retake() {
+    capturedBlob = null;
     openCamera();
 }
 
-/**
- * Close camera
- */
-function closeCamera() {
-    if (videoStream) {
-        videoStream.getTracks().forEach(track => track.stop());
-        videoStream = null;
-    }
+async function sendPhoto() {
+    if (!capturedBlob) return;
+    showView('progress');
+    $('#progress-text').text('Gonderiliyor...');
+    $('#progress-fill').css('width', '0%');
 
-    elements.cameraView.addClass('hidden');
-    elements.actions.removeClass('hidden');
+    try {
+        await rtc.sendImage(capturedBlob, 'photo.jpg');
+        showSuccess();
+    } catch (e) {
+        showError('Gonderilemedi.');
+    }
+    capturedBlob = null;
 }
 
-// ==================== Audio Recording Functions ====================
+// Gallery
+async function handleFile(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    e.target.value = '';
 
-/**
- * Start audio recording
- */
-async function startAudioRecording() {
+    showView('progress');
+    $('#progress-text').text('Gonderiliyor...');
+    $('#progress-fill').css('width', '0%');
+
+    try {
+        await rtc.sendImage(file, file.name);
+        showSuccess();
+    } catch (e) {
+        showError('Gonderilemedi.');
+    }
+}
+
+// Audio
+async function startRecording() {
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-        mediaRecorder = new MediaRecorder(stream, {
-            mimeType: 'audio/webm;codecs=opus'
-        });
+        mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
         audioChunks = [];
 
-        mediaRecorder.ondataavailable = (e) => {
-            if (e.data.size > 0) {
-                audioChunks.push(e.data);
-            }
+        mediaRecorder.ondataavailable = e => {
+            if (e.data.size > 0) audioChunks.push(e.data);
         };
 
-        mediaRecorder.start(100); // Collect data every 100ms
-
-        // Show audio view
-        elements.actions.addClass('hidden');
-        elements.audioView.removeClass('hidden');
-
-        // Start timer
+        mediaRecorder.start(100);
         audioSeconds = 0;
-        updateAudioTimer();
+        updateTimer();
         audioTimer = setInterval(() => {
             audioSeconds++;
-            updateAudioTimer();
-            updateWaveform();
+            updateTimer();
         }, 1000);
 
-        // Create initial waveform bars
-        createWaveformBars();
-
-    } catch (error) {
-        console.error('Audio recording error:', error);
+        showView('audio');
+    } catch (e) {
         alert('Mikrofon erisimi reddedildi.');
     }
 }
 
-/**
- * Update audio timer display
- */
-function updateAudioTimer() {
-    const mins = Math.floor(audioSeconds / 60);
-    const secs = audioSeconds % 60;
-    elements.audioTimer.text(`${mins}:${secs.toString().padStart(2, '0')}`);
+function updateTimer() {
+    const m = Math.floor(audioSeconds / 60);
+    const s = audioSeconds % 60;
+    $('#audio-timer').text(`${m}:${s.toString().padStart(2, '0')}`);
 }
 
-/**
- * Create waveform visualization bars
- */
-function createWaveformBars() {
-    elements.waveformBars.empty();
-    for (let i = 0; i < 30; i++) {
-        const bar = $('<div>').addClass('waveform-bar').css('height', '4px');
-        elements.waveformBars.append(bar);
+function cancelRecording() {
+    clearInterval(audioTimer);
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop();
+        mediaRecorder.stream.getTracks().forEach(t => t.stop());
     }
+    showView('main');
 }
 
-/**
- * Update waveform animation
- */
-function updateWaveform() {
-    const bars = elements.waveformBars.find('.waveform-bar');
-    bars.each(function() {
-        const height = Math.random() * 50 + 10;
-        $(this).css('height', height + 'px');
-    });
-}
-
-/**
- * Stop audio recording and send
- */
-async function stopAudioRecording() {
+async function stopRecording() {
     clearInterval(audioTimer);
 
-    return new Promise((resolve) => {
+    return new Promise(resolve => {
         mediaRecorder.onstop = async () => {
             const blob = new Blob(audioChunks, { type: 'audio/webm' });
 
-            elements.audioView.addClass('hidden');
+            showView('progress');
+            $('#progress-text').text('Gonderiliyor...');
+            $('#progress-fill').css('width', '0%');
 
-            await sendMedia('audio', 'recording.webm', blob);
-
-            elements.actions.removeClass('hidden');
+            try {
+                await rtc.sendAudio(blob, 'kayit.webm');
+                showSuccess();
+            } catch (e) {
+                showError('Gonderilemedi.');
+            }
             resolve();
         };
 
         mediaRecorder.stop();
-
-        // Stop microphone
-        if (mediaRecorder.stream) {
-            mediaRecorder.stream.getTracks().forEach(track => track.stop());
-        }
+        mediaRecorder.stream.getTracks().forEach(t => t.stop());
     });
 }
 
-/**
- * Cancel audio recording
- */
-function cancelAudioRecording() {
-    clearInterval(audioTimer);
-
-    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-        mediaRecorder.stop();
-        if (mediaRecorder.stream) {
-            mediaRecorder.stream.getTracks().forEach(track => track.stop());
-        }
-    }
-
-    elements.audioView.addClass('hidden');
-    elements.actions.removeClass('hidden');
+// Success
+function showSuccess() {
+    showView('success');
+    setTimeout(() => showView('main'), 1500);
 }
 
-// ==================== File Handling ====================
-
-/**
- * Handle file selection from gallery
- */
-async function handleFileSelect(event) {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    await sendMedia('image', file.name, file);
-
-    // Reset input for next selection
-    event.target.value = '';
-}
-
-// ==================== Media Sending ====================
-
-/**
- * Send media to Tahta
- */
-async function sendMedia(type, filename, blob) {
-    if (!rtc || !rtc.isConnected) {
-        showError('Baglanti yok. Sayfayi yenileyin.');
-        return;
-    }
-
-    try {
-        // Show progress
-        elements.progress.removeClass('hidden');
-        elements.progressText.text('Gonderiliyor...');
-        elements.progressBar.css('width', '0%');
-
-        // Send via WebRTC
-        if (type === 'image') {
-            await rtc.sendImage(blob, filename);
-        } else if (type === 'audio') {
-            await rtc.sendAudio(blob, filename);
-        }
-
-        // Success
-        elements.progressText.text('Gonderildi!');
-        elements.progressBar.css('width', '100%');
-
-        // Hide progress after delay
-        setTimeout(() => {
-            elements.progress.addClass('hidden');
-            elements.progressBar.css('width', '0%');
-        }, 2000);
-
-    } catch (error) {
-        console.error('Send error:', error);
-        elements.progressText.text('Gonderme hatasi!');
-
-        setTimeout(() => {
-            elements.progress.addClass('hidden');
-        }, 2000);
-    }
-}
-
-// ==================== Cleanup ====================
-
-// Cleanup on page unload
+// Cleanup
 window.addEventListener('beforeunload', () => {
-    if (videoStream) {
-        videoStream.getTracks().forEach(track => track.stop());
-    }
-
+    stopCamera();
     if (mediaRecorder && mediaRecorder.state !== 'inactive') {
         mediaRecorder.stop();
     }
-
-    if (rtc) {
-        rtc.disconnect();
-    }
+    if (rtc) rtc.disconnect();
 });
