@@ -33,10 +33,14 @@ export class WebRTCClient {
         this.onDisconnected = null;
         this.onProgress = null;
         this.onError = null;
+        this.onFileReceived = null;  // Called when file is received from Tahta
 
         // State
         this.isConnected = false;
         this.connectionTimeout = null;
+
+        // File receiving state
+        this.pendingFile = null;
 
         log(`Platform: iOS=${isIOS}, Safari=${isSafari}, iOS Safari=${isIOSSafari}`);
     }
@@ -86,6 +90,11 @@ export class WebRTCClient {
             this.dataChannel.onerror = (error) => {
                 log('DataChannel ERROR', error);
                 if (this.onError) this.onError(error);
+            };
+
+            // Handle incoming messages (for receiving files from Tahta)
+            this.dataChannel.onmessage = (event) => {
+                this.handleMessage(event.data);
             };
 
             // ICE candidate handling
@@ -296,6 +305,97 @@ export class WebRTCClient {
     async sendAudio(blob, filename = 'recording.webm') {
         const arrayBuffer = await blob.arrayBuffer();
         await this.sendFile('audio', filename, arrayBuffer);
+    }
+
+    /**
+     * Handle incoming message from Tahta
+     */
+    handleMessage(data) {
+        try {
+            if (typeof data === 'string') {
+                const msg = JSON.parse(data);
+
+                if (msg.header) {
+                    // Start receiving file
+                    log('Receiving file:', msg.header.filename);
+                    this.pendingFile = {
+                        type: msg.header.type,
+                        filename: msg.header.filename,
+                        totalSize: msg.header.totalSize,
+                        totalChunks: msg.header.totalChunks,
+                        chunks: [],
+                        receivedSize: 0
+                    };
+                } else if (msg.complete && this.pendingFile) {
+                    // File transfer complete
+                    this.finalizeFile();
+                }
+            } else if (data instanceof ArrayBuffer || data instanceof Blob) {
+                // Binary chunk
+                if (this.pendingFile) {
+                    if (data instanceof Blob) {
+                        data.arrayBuffer().then(ab => {
+                            this.pendingFile.chunks.push(ab);
+                            this.pendingFile.receivedSize += ab.byteLength;
+                            if (this.onProgress) {
+                                this.onProgress(this.pendingFile.receivedSize / this.pendingFile.totalSize);
+                            }
+                        });
+                    } else {
+                        this.pendingFile.chunks.push(data);
+                        this.pendingFile.receivedSize += data.byteLength;
+                        if (this.onProgress) {
+                            this.onProgress(this.pendingFile.receivedSize / this.pendingFile.totalSize);
+                        }
+                    }
+                }
+            }
+        } catch (e) {
+            log('Error handling message:', e);
+        }
+    }
+
+    /**
+     * Finalize received file
+     */
+    finalizeFile() {
+        if (!this.pendingFile) return;
+
+        const { type, filename, chunks } = this.pendingFile;
+        log(`File received: ${filename}, ${chunks.length} chunks`);
+
+        // Combine chunks
+        const blob = new Blob(chunks, { type: type === 'pdf' ? 'application/pdf' : 'application/octet-stream' });
+
+        // Trigger download
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        log('File downloaded:', filename);
+
+        if (this.onFileReceived) {
+            this.onFileReceived(type, filename, blob);
+        }
+
+        this.pendingFile = null;
+    }
+
+    /**
+     * Request PDF from Tahta
+     */
+    requestPdf() {
+        if (!this.dataChannel || this.dataChannel.readyState !== 'open') {
+            throw new Error('DataChannel not open');
+        }
+
+        log('Requesting PDF from Tahta...');
+        this.dataChannel.send(JSON.stringify({ type: 'pdf_request' }));
     }
 
     /**

@@ -54,6 +54,7 @@ $(document).ready(() => {
     $('#btn-camera').click(openCamera);
     $('#btn-gallery').click(() => $('#file-input').click());
     $('#btn-audio').click(startRecording);
+    $('#btn-pdf').click(requestPdf);
     $('#btn-capture').click(capture);
     $('#btn-cancel-camera').click(closeCamera);
     $('#btn-switch-camera').click(switchCamera);
@@ -279,6 +280,31 @@ async function stopRecording() {
         mediaRecorder.stop();
         mediaRecorder.stream.getTracks().forEach(t => t.stop());
     });
+}
+
+// PDF
+function requestPdf() {
+    if (!rtc || !rtc.isConnected) {
+        alert('Baglanti yok');
+        return;
+    }
+
+    showView('progress');
+    $('#progress-text').text('PDF hazirlaniyor...');
+    $('#progress-fill').css('width', '0%');
+
+    // Set up file received callback
+    rtc.onFileReceived = (type, filename, blob) => {
+        if (type === 'pdf') {
+            showSuccess();
+        }
+    };
+
+    try {
+        rtc.requestPdf();
+    } catch (e) {
+        showError('PDF alinamadi.');
+    }
 }
 
 // Success
