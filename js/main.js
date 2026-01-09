@@ -23,6 +23,8 @@ const views = {
     camera: null,
     photo: null,
     audio: null,
+    youtube: null,
+    link: null,
     progress: null,
     success: null
 };
@@ -35,6 +37,8 @@ $(document).ready(() => {
     views.camera = $('#camera-view');
     views.photo = $('#photo-view');
     views.audio = $('#audio-view');
+    views.youtube = $('#youtube-view');
+    views.link = $('#link-view');
     views.progress = $('#progress-view');
     views.success = $('#success-view');
 
@@ -55,6 +59,8 @@ $(document).ready(() => {
     $('#btn-gallery').click(() => $('#file-input').click());
     $('#btn-audio').click(startRecording);
     $('#btn-pdf').click(requestPdf);
+    $('#btn-youtube').click(openYoutube);
+    $('#btn-link').click(openLink);
     $('#btn-capture').click(capture);
     $('#btn-cancel-camera').click(closeCamera);
     $('#btn-switch-camera').click(switchCamera);
@@ -62,6 +68,10 @@ $(document).ready(() => {
     $('#btn-retake').click(retake);
     $('#btn-stop-audio').click(stopRecording);
     $('#btn-cancel-audio').click(cancelRecording);
+    $('#btn-cancel-youtube').click(() => showView('main'));
+    $('#btn-send-youtube').click(sendYoutube);
+    $('#btn-cancel-link').click(() => showView('main'));
+    $('#btn-send-link').click(sendLink);
     $('#btn-retry').click(() => location.reload());
     $('#file-input').change(handleFile);
 });
@@ -280,6 +290,71 @@ async function stopRecording() {
         mediaRecorder.stop();
         mediaRecorder.stream.getTracks().forEach(t => t.stop());
     });
+}
+
+// YouTube
+function openYoutube() {
+    $('#youtube-input').val('');
+    showView('youtube');
+}
+
+function sendYoutube() {
+    const url = $('#youtube-input').val().trim();
+    if (!url) {
+        alert('Lutfen bir YouTube linki girin');
+        return;
+    }
+
+    // Validate YouTube URL
+    const youtubeRegex = /(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
+    const match = url.match(youtubeRegex);
+    if (!match) {
+        alert('Gecersiz YouTube linki');
+        return;
+    }
+
+    const videoId = match[1];
+
+    showView('progress');
+    $('#progress-text').text('Gonderiliyor...');
+    $('#progress-fill').css('width', '50%');
+
+    try {
+        rtc.sendData('youtube', { url, videoId });
+        $('#progress-fill').css('width', '100%');
+        showSuccess();
+    } catch (e) {
+        showError('Gonderilemedi.');
+    }
+}
+
+// Link
+function openLink() {
+    $('#link-input').val('');
+    $('#link-title').val('');
+    showView('link');
+}
+
+function sendLink() {
+    const url = $('#link-input').val().trim();
+    if (!url) {
+        alert('Lutfen bir link girin');
+        return;
+    }
+
+    const title = $('#link-title').val().trim() || url;
+
+    showView('progress');
+    $('#progress-text').text('Gonderiliyor...');
+    $('#progress-fill').css('width', '50%');
+
+    try {
+        rtc.sendData('link', { url, title });
+        $('#progress-fill').css('width', '100%');
+        showSuccess();
+    } catch (e) {
+        showError('Gonderilemedi.');
+    }
 }
 
 // PDF

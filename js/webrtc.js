@@ -399,6 +399,20 @@ export class WebRTCClient {
     }
 
     /**
+     * Send JSON data to Tahta (for youtube links, web links, etc.)
+     * @param {string} type - 'youtube' or 'link'
+     * @param {object} data - Data to send
+     */
+    sendData(type, data) {
+        if (!this.dataChannel || this.dataChannel.readyState !== 'open') {
+            throw new Error('DataChannel not open');
+        }
+
+        log(`Sending ${type} data:`, data);
+        this.dataChannel.send(JSON.stringify({ type, data }));
+    }
+
+    /**
      * Disconnect from Tahta
      */
     disconnect() {

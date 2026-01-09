@@ -76,6 +76,26 @@
                     </div>
                     <span>PDF Indir</span>
                 </button>
+
+                <button id="btn-youtube" class="action-card">
+                    <div class="action-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <rect x="2" y="4" width="20" height="16" rx="4"/>
+                            <polygon points="10,8 16,12 10,16" fill="currentColor" stroke="none"/>
+                        </svg>
+                    </div>
+                    <span>YouTube</span>
+                </button>
+
+                <button id="btn-link" class="action-card">
+                    <div class="action-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/>
+                            <path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/>
+                        </svg>
+                    </div>
+                    <span>Link</span>
+                </button>
             </div>
         </div>
 
@@ -125,6 +145,32 @@
             <div class="action-buttons">
                 <button id="btn-cancel-audio" class="btn-secondary">Iptal</button>
                 <button id="btn-stop-audio" class="btn-primary">Gonder</button>
+            </div>
+        </div>
+
+        <!-- YouTube Input -->
+        <div id="youtube-view" class="view hidden">
+            <div class="input-container">
+                <p class="input-label">YouTube Video Linki</p>
+                <input type="url" id="youtube-input" placeholder="https://youtube.com/watch?v=..." class="text-input">
+                <p class="input-hint">Video tahtaya yerlestirilecek</p>
+            </div>
+            <div class="action-buttons">
+                <button id="btn-cancel-youtube" class="btn-secondary">Iptal</button>
+                <button id="btn-send-youtube" class="btn-primary">Gonder</button>
+            </div>
+        </div>
+
+        <!-- Link Input -->
+        <div id="link-view" class="view hidden">
+            <div class="input-container">
+                <p class="input-label">Link</p>
+                <input type="url" id="link-input" placeholder="https://..." class="text-input">
+                <input type="text" id="link-title" placeholder="Baslik (opsiyonel)" class="text-input" style="margin-top: 12px;">
+            </div>
+            <div class="action-buttons">
+                <button id="btn-cancel-link" class="btn-secondary">Iptal</button>
+                <button id="btn-send-link" class="btn-primary">Gonder</button>
             </div>
         </div>
 
