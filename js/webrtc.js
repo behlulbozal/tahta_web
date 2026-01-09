@@ -5,6 +5,20 @@
 
 const CHUNK_SIZE = 64 * 1024; // 64KB chunks
 
+// Detect iOS Safari
+const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+const isIOSSafari = isIOS && isSafari;
+
+function log(msg, data = null) {
+    const timestamp = new Date().toISOString().substr(11, 12);
+    if (data) {
+        console.log(`[${timestamp}] ${msg}`, data);
+    } else {
+        console.log(`[${timestamp}] ${msg}`);
+    }
+}
+
 /**
  * WebRTC client class
  */
@@ -22,6 +36,9 @@ export class WebRTCClient {
 
         // State
         this.isConnected = false;
+        this.connectionTimeout = null;
+
+        log(`Platform: iOS=${isIOS}, Safari=${isSafari}, iOS Safari=${isIOSSafari}`);
     }
 
     /**
@@ -34,55 +51,75 @@ export class WebRTCClient {
                 iceServers: [
                     { urls: 'stun:stun.l.google.com:19302' },
                     { urls: 'stun:stun1.l.google.com:19302' },
-                    { urls: 'stun:stun2.l.google.com:19302' }
-                ]
+                    { urls: 'stun:stun2.l.google.com:19302' },
+                    { urls: 'stun:stun3.l.google.com:19302' },
+                    { urls: 'stun:stun4.l.google.com:19302' }
+                ],
+                // iOS Safari sometimes needs this
+                iceCandidatePoolSize: 10
             };
 
             // Create peer connection
             this.pc = new RTCPeerConnection(config);
+            log('RTCPeerConnection created');
 
             // Create data channel for sending media
             this.dataChannel = this.pc.createDataChannel('media', {
                 ordered: true
             });
+            log('DataChannel created');
 
             // Data channel events
             this.dataChannel.onopen = () => {
-                console.log('DataChannel open');
+                log('DataChannel OPEN');
+                this.clearConnectionTimeout();
                 this.isConnected = true;
                 if (this.onConnected) this.onConnected();
             };
 
             this.dataChannel.onclose = () => {
-                console.log('DataChannel closed');
+                log('DataChannel CLOSED');
                 this.isConnected = false;
                 if (this.onDisconnected) this.onDisconnected();
             };
 
             this.dataChannel.onerror = (error) => {
-                console.error('DataChannel error:', error);
+                log('DataChannel ERROR', error);
                 if (this.onError) this.onError(error);
             };
 
             // ICE candidate handling
             this.pc.onicecandidate = (event) => {
                 if (event.candidate) {
+                    log('Local ICE candidate', event.candidate.candidate.substr(0, 50) + '...');
                     this.signaling.addIceCandidate({
                         candidate: event.candidate.candidate,
                         sdpMid: event.candidate.sdpMid,
                         sdpMLineIndex: event.candidate.sdpMLineIndex
                     });
+                } else {
+                    log('ICE gathering complete (null candidate)');
                 }
+            };
+
+            // ICE gathering state change
+            this.pc.onicegatheringstatechange = () => {
+                log('ICE gathering state:', this.pc.iceGatheringState);
             };
 
             // Connection state change
             this.pc.onconnectionstatechange = () => {
-                console.log('Connection state:', this.pc.connectionState);
+                log('Connection state:', this.pc.connectionState);
 
                 if (this.pc.connectionState === 'connected') {
+                    this.clearConnectionTimeout();
                     this.signaling.updateStatus('connected');
-                } else if (this.pc.connectionState === 'failed' ||
-                           this.pc.connectionState === 'disconnected' ||
+                } else if (this.pc.connectionState === 'failed') {
+                    log('CONNECTION FAILED - this is the issue on iOS Safari');
+                    this.clearConnectionTimeout();
+                    this.isConnected = false;
+                    if (this.onError) this.onError(new Error('Connection failed'));
+                } else if (this.pc.connectionState === 'disconnected' ||
                            this.pc.connectionState === 'closed') {
                     this.isConnected = false;
                     if (this.onDisconnected) this.onDisconnected();
@@ -91,38 +128,100 @@ export class WebRTCClient {
 
             // ICE connection state change
             this.pc.oniceconnectionstatechange = () => {
-                console.log('ICE connection state:', this.pc.iceConnectionState);
+                log('ICE connection state:', this.pc.iceConnectionState);
+
+                // On iOS Safari, sometimes only ICE connection state changes, not connection state
+                if (this.pc.iceConnectionState === 'connected' || this.pc.iceConnectionState === 'completed') {
+                    log('ICE connected/completed');
+                } else if (this.pc.iceConnectionState === 'failed') {
+                    log('ICE CONNECTION FAILED');
+                    if (isIOSSafari) {
+                        alert('ICE connection failed. This may be a network issue on iOS Safari.');
+                    }
+                } else if (this.pc.iceConnectionState === 'disconnected') {
+                    log('ICE disconnected');
+                }
+            };
+
+            // Signaling state change
+            this.pc.onsignalingstatechange = () => {
+                log('Signaling state:', this.pc.signalingState);
             };
 
             // Listen for answer from Tahta
-            this.signaling.onAnswer((answer) => {
-                console.log('Received answer from Tahta');
-                this.pc.setRemoteDescription(new RTCSessionDescription(answer));
+            this.signaling.onAnswer(async (answer) => {
+                log('Received answer from Tahta');
+                log('Answer SDP type:', answer.type);
+                log('Answer SDP length:', answer.sdp?.length);
+
+                try {
+                    const desc = new RTCSessionDescription(answer);
+                    log('RTCSessionDescription created');
+
+                    await this.pc.setRemoteDescription(desc);
+                    log('Remote description SET successfully');
+                    log('Signaling state after answer:', this.pc.signalingState);
+                    log('ICE connection state after answer:', this.pc.iceConnectionState);
+                    log('Connection state after answer:', this.pc.connectionState);
+                } catch (err) {
+                    log('ERROR setting remote description:', err.message);
+                    alert('SDP Error: ' + err.message);
+                    if (this.onError) this.onError(err);
+                }
             });
 
             // Listen for ICE candidates from Tahta
-            this.signaling.onRemoteIceCandidate((candidate) => {
-                console.log('Received ICE candidate from Tahta');
+            this.signaling.onRemoteIceCandidate(async (candidate) => {
+                log('Received remote ICE candidate');
                 if (candidate && candidate.candidate) {
-                    this.pc.addIceCandidate(new RTCIceCandidate(candidate));
+                    try {
+                        const iceCandidate = new RTCIceCandidate(candidate);
+                        await this.pc.addIceCandidate(iceCandidate);
+                        log('Remote ICE candidate ADDED');
+                    } catch (err) {
+                        log('ERROR adding remote ICE candidate:', err.message);
+                    }
                 }
             });
 
             // Create and send offer
+            log('Creating offer...');
             const offer = await this.pc.createOffer();
+            log('Offer created, setting local description...');
             await this.pc.setLocalDescription(offer);
+            log('Local description set');
 
             await this.signaling.setOffer({
                 type: offer.type,
                 sdp: offer.sdp
             });
+            log('Offer sent to Firebase');
 
-            console.log('Offer sent to Tahta');
+            // Set connection timeout (30 seconds)
+            this.connectionTimeout = setTimeout(() => {
+                if (!this.isConnected) {
+                    log('CONNECTION TIMEOUT after 30 seconds');
+                    log('Final states - ICE:', this.pc?.iceConnectionState, 'Connection:', this.pc?.connectionState);
+                    if (isIOSSafari) {
+                        alert('Connection timeout. States: ICE=' + this.pc?.iceConnectionState + ', Conn=' + this.pc?.connectionState);
+                    }
+                }
+            }, 30000);
 
         } catch (error) {
-            console.error('WebRTC connect error:', error);
+            log('WebRTC connect ERROR', error);
             if (this.onError) this.onError(error);
             throw error;
+        }
+    }
+
+    /**
+     * Clear connection timeout
+     */
+    clearConnectionTimeout() {
+        if (this.connectionTimeout) {
+            clearTimeout(this.connectionTimeout);
+            this.connectionTimeout = null;
         }
     }
 
@@ -203,6 +302,9 @@ export class WebRTCClient {
      * Disconnect from Tahta
      */
     disconnect() {
+        log('Disconnecting...');
+        this.clearConnectionTimeout();
+
         if (this.dataChannel) {
             this.dataChannel.close();
             this.dataChannel = null;
@@ -215,5 +317,6 @@ export class WebRTCClient {
 
         this.isConnected = false;
         this.signaling.cleanup();
+        log('Disconnected');
     }
 }
